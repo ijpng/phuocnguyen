@@ -1,32 +1,242 @@
-# Prerequisites
-*.d
+//DHT11
+#include "TinyDHT.h"
+#define DHTPIN 36                           
+#define DHTTYPE DHT11  
+DHT dht(DHTPIN, DHTTYPE);
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+// Dust sensor meter
+int pin = 8;                          
+unsigned long duration;
+unsigned long starttime;
+unsigned long sampletime_ms = 30000;          // sampe 30s;
+unsigned long lowpulseoccupancy = 0;
+float ratio = 0;
+float concentration = 0;
+                
+// Ultrasonic Sensor
+#define trigpin    24                
+#define echopin    22
+float period;                      
+float distance;
+                                     
+// RGB LED
+#define rled       9               
+#define gled       10
+#define bled       11
 
-# Precompiled Headers
-*.gch
-*.pch
+// DC Motor
+#define MTR1A      34                 
+#define MTR2A      32 
+#define ENMTR1     12
+#define MTR1B      30                
+#define MTR2B      28
+#define ENMTR2     13 
+#define buzzer     26                         //ACTIVE LOW
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+//LCD
+#include <LiquidCrystal_I2C.h>                
+#include <Wire.h>  
+LiquidCrystal_I2C lcd(0x27,16,2);             // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-# Fortran module files
-*.mod
-*.smod
+//Create special character. In this case, it's "degree".
+byte degree[] = {
+  B01100,
+  B10010,
+  B10010,
+  B01100,
+  B00000,
+  B00000,
+  B00000,
+  B00000,
+};
+int a;          
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+void setup() {  
+  Serial.begin(9600);                         // Dust sensor meter
+  pinMode(8,INPUT);
+  starttime = millis();                       //get the current time;
+  pinMode(rled, OUTPUT);                      //RGB LED
+  pinMode(gled, OUTPUT);
+  pinMode(bled, OUTPUT);
+  pinMode(trigpin, OUTPUT);                   // Ultrasonic sensor
+  pinMode(echopin, INPUT);
+  pinMode(ENMTR1, OUTPUT);                    // DC motor
+  pinMode(MTR1A, OUTPUT);             
+  pinMode(MTR2A, OUTPUT);
+  pinMode(ENMTR2, OUTPUT);            
+  pinMode(MTR1B, OUTPUT);             
+  pinMode(MTR2B, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  dht.begin();                                 // DHT11
+  
+  lcd.init();                                  // initialize the lcd 
+  lcd.backlight();
+  lcd.createChar(a, degree);
+  lcd.home();
+  // Print a message to the LCD.
+  lcd.setCursor(0,0);
+  lcd.print("T");
+  lcd.setCursor(1,0);
+  lcd.print(":");
+  lcd.setCursor(5,0);                           
+  lcd.write(a);                                //write the degree symbol in the LCD
+  lcd.setCursor(6,0);
+  lcd.print("C");
+  lcd.setCursor(7,0);
+  lcd.print(",");
+  lcd.setCursor(8,0);
+  lcd.print("H");
+  lcd.setCursor(9,0);
+  lcd.print(":");
+  lcd.setCursor(13,0);
+  lcd.print("%");
+  lcd.setCursor(0,1);
+  lcd.print("C");
+  lcd.setCursor(1,1);
+  lcd.print(":");
+  lcd.setCursor(9,1);
+  lcd.print("p");
+  lcd.setCursor(10,1);
+  lcd.print("c");
+  lcd.setCursor(11,1);
+  lcd.print("s");
+  lcd.setCursor(12,1);
+  lcd.print("/");
+  lcd.setCursor(13,1);
+  lcd.print("L");
+}
 
-# Executables
-*.exe
-*.out
-*.app
+void loop() {
+  //Dust sensor meter detecting
+  duration = pulseIn(pin, LOW);
+  lowpulseoccupancy = lowpulseoccupancy+duration;
+  
+  if((millis()-starttime) > sampletime_ms)                              //if the sample time ==30s
+  {
+  ratio = lowpulseoccupancy/(sampletime_ms*10.0);                       //Integer percentage 0-->100
+  concentration = 1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62;     // using specific sheet curve
+  Serial.print("concentration =");
+  Serial.print(concentration);
+  Serial.println(" pcs/o.01cf");
+  Serial.println("\n");
+  lowpulseoccupancy = 0;
+  starttime = millis();
+  }
+  
+  // DHT11 sensor detecting
+  // Reading temperature or humidity takes about 250 milliseconds!
+  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  int8_t h = dht.readHumidity();
+  int16_t t = dht.readTemperature();
+  if ( t == BAD_TEMP || h == BAD_HUM ) {            // if error conditions          
+    Serial.println("Failed to read from DHT");
+  } 
+  else {
+    Serial.print("Humidity: "); 
+    Serial.print(h);
+    Serial.print(" %\t");
+    Serial.print("Temperature: "); 
+    Serial.print(t);
+    Serial.println(" *C");
+  }
+  delay(2000);                                        //delay 2s to read result
+
+  //LCD displays indexes
+  lcd.setCursor(2,0);                                    
+  lcd.print(t);
+  lcd.setCursor(10,0);
+  lcd.print(h);
+  lcd.setCursor(2,1);
+  lcd.print(concentration);
+  
+  //Ultrasonic sensor
+  digitalWrite(trigpin, LOW);                             
+  delayMicroseconds(5);
+  digitalWrite(trigpin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigpin, LOW);
+  
+  period = pulseIn(echopin, HIGH);
+  distance = (period /58) - 1.03;                          //calibration: 1.03 cm
+ 
+  Serial.print("Distance = ");
+  Serial.print(distance);
+  Serial.println(" cm");
+  delay(2000);                                              //delay 2s to read result
+  
+  if(t > 45 && h <= 70 && concentration <= 500){             //high temperature
+    analogWrite(rled, 255);                                //RGB turns red
+    analogWrite(gled, 0);                                
+    analogWrite(bled, 0);
+    digitalWrite(buzzer, HIGH);
+  }
+  else if(t <= 45 && h > 70 && concentration <= 500){        //high humidity
+    analogWrite(rled, 0);
+    analogWrite(gled, 0);
+    analogWrite(bled, 255);                                //RGB turns blue
+    digitalWrite(buzzer, HIGH);
+  }
+  else if(t <= 45 && h <= 70 && concentration > 500){        // high concentration
+    analogWrite(rled, 0); 
+    analogWrite(gled, 255);                                //RGB turns green      
+    analogWrite(bled, 0);
+    digitalWrite(buzzer, HIGH);
+  }
+  else if(t > 45 && h > 70 && concentration <= 500){       //high temperature and high humidity
+    analogWrite(rled, 255);                               //RGB turns purple
+    analogWrite(gled, 0);
+    analogWrite(bled, 255);
+    digitalWrite(buzzer, HIGH);
+  }
+   else if(t > 45 && h <= 70 && concentration > 500){      //high temperature and high concentration
+    analogWrite(rled, 255);                               //RGB turns yellow
+    analogWrite(gled, 255);
+    analogWrite(bled, 0);
+    digitalWrite(buzzer, HIGH);
+  }
+  else if(t <= 45 && h > 70 && concentration > 500){       //high humidity and high concentration
+    analogWrite(rled, 0);                                 //RGB turns light blue
+    analogWrite(gled, 255);
+    analogWrite(bled, 255);
+    digitalWrite(buzzer, HIGH);
+  }
+  else if(t > 45 && h > 70 && concentration > 500){       //all of the conditions are bad
+    analogWrite(rled, 10);                                //RGB turns pink
+    analogWrite(gled, 10);
+    analogWrite(bled, 0);
+    digitalWrite(buzzer, LOW);                            //the buzzer turns on to warn the user
+  }
+  else{                                                   // normal quality
+    analogWrite(rled, 0);                                 //LED turns off
+    analogWrite(gled, 0);
+    analogWrite(bled, 0);
+    digitalWrite(buzzer, HIGH);
+  }
+
+   if(distance <150){                                      //object is in the range of 1.5 meter.
+    digitalWrite(MTR1A, LOW);                             //DC motor opens the cage
+    digitalWrite(MTR2A, HIGH);
+    analogWrite(ENMTR1, 255);
+    delay(4000);                                          //runs for 6s
+    digitalWrite(MTR1A, LOW);                             //DC motor stops
+    digitalWrite(MTR2A, LOW);
+    analogWrite(ENMTR1, 0);
+    delay(2000);                                          //stop for 3s
+    digitalWrite(MTR1B, HIGH);                             //DC motor closes the cage
+    digitalWrite(MTR2B, LOW);
+    analogWrite(ENMTR2, 255);
+    delay(4000);                                         //runs for 6s                              
+    digitalWrite(MTR1B, LOW);                             //DC motor stops 
+    digitalWrite(MTR2B, LOW);
+    analogWrite(ENMTR2, 0);
+    delay(2000);
+  }
+  else{                                                   //object is over 1.5 meter far
+    digitalWrite(MTR1A, LOW);                             //DC motor stops
+    digitalWrite(MTR2A, LOW);
+    analogWrite(ENMTR1, 0);
+    digitalWrite(MTR1B, LOW);
+    digitalWrite(MTR2B, LOW);
+    analogWrite(ENMTR2, 0);
+  }
+  }
